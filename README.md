@@ -59,7 +59,7 @@ Two KV namespaces are used:
 ## Install
 
 ```sh
-git clone <your fork>
+git clone https://github.com/weig/oauth_relay.git
 cd oauth_relay
 npm install
 ```
