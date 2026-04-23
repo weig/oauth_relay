@@ -123,6 +123,102 @@ Created auth entry:
 Both `<uuid>` and `<callback>` must match `^[A-Za-z0-9_-]{8,128}$` — the same
 pattern the worker validates against before touching KV.
 
+## Integrating an OAuth client
+
+Once an operator has run `bin/auth.sh set <callback>` and handed you a
+`<uuid>` + `<callback>` pair, you have everything you need. The relay exposes
+two GET endpoints:
+
+| Endpoint                          | Who calls it       | Behavior                                                                 |
+|-----------------------------------|--------------------|--------------------------------------------------------------------------|
+| `/<uuid>/<callback>`              | the OAuth provider | Stores the raw querystring in KV under `<uuid>` (TTL 60s) and renders an HTML "you can close this tab" page. |
+| `/<uuid>/<callback>/wait`         | your CLI           | Long-polls for up to 30s. Returns the stored querystring as `text/plain` (and deletes it), or `408 timeout` if none arrived. |
+
+### Flow
+
+1. Generate a random `state` value (for CSRF defense).
+2. Open the provider's authorize URL in the user's browser, using
+   `https://<your-worker>.workers.dev/<uuid>/<callback>` as `redirect_uri`.
+3. In parallel, start polling `…/<uuid>/<callback>/wait`. Retry on `408`
+   until the user completes consent (or your own overall deadline expires).
+4. When `/wait` returns `200`, its body is the raw querystring the provider
+   redirected with (`code=…&state=…` etc.). Parse it, check `state`, then
+   exchange the `code` for a token against the provider's token endpoint as
+   usual.
+
+### Minimal Python example
+
+```python
+import secrets
+import time
+import urllib.parse
+import urllib.request
+import webbrowser
+from urllib.error import HTTPError
+
+RELAY     = "https://oauth-relay.example.workers.dev"
+UUID      = "019db2ef-eacb-7d56-82b1-32dbcd438699"
+CALLBACK  = "my_callback"
+CLIENT_ID = "YOUR_CLIENT_ID"
+AUTHORIZE = "https://provider.example.com/oauth/authorize"
+
+
+def fetch_auth_code(scope: str, overall_timeout_s: float = 300.0) -> tuple[str, str]:
+    state = secrets.token_urlsafe(16)
+    redirect_uri = f"{RELAY}/{UUID}/{CALLBACK}"
+
+    authorize_url = AUTHORIZE + "?" + urllib.parse.urlencode({
+        "client_id":     CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri":  redirect_uri,
+        "scope":         scope,
+        "state":         state,
+    })
+    webbrowser.open(authorize_url)
+
+    wait_url = f"{RELAY}/{UUID}/{CALLBACK}/wait"
+    deadline = time.monotonic() + overall_timeout_s
+
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(wait_url, timeout=35) as resp:
+                body = resp.read().decode("utf-8")
+        except HTTPError as exc:
+            if exc.code == 408:        # long-poll idle; try again
+                continue
+            raise
+
+        params = urllib.parse.parse_qs(body, strict_parsing=True)
+        if params.get("state", [""])[0] != state:
+            raise RuntimeError("state mismatch — aborting")
+        return params["code"][0], state
+
+    raise TimeoutError("user did not complete consent in time")
+```
+
+### Shell sanity check
+
+To verify end-to-end wiring without writing any code, run this in one
+terminal:
+
+```sh
+curl -sS "https://<your-worker>.workers.dev/<uuid>/<callback>/wait"
+```
+
+Then, in your browser, hit
+`https://<your-worker>.workers.dev/<uuid>/<callback>?code=test&state=abc`.
+The `curl` call will return the body `code=test&state=abc`.
+
+### Operational notes
+
+- `/wait` is single-shot: the stored querystring is deleted the moment it's
+  returned, so only the CLI that asked for it gets it.
+- KV entries expire after 60 seconds. If the user is slow to consent, your
+  CLI must still be polling when the redirect lands.
+- One `<uuid>` slot serves one in-flight flow at a time — if two CLIs race
+  against the same `<uuid>`, only the first `/wait` caller wins. Provision
+  separate `<uuid>` + `<callback>` pairs per CLI / per user.
+
 ## Local development
 
 ```sh
