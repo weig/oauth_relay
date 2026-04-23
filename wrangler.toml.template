@@ -1,0 +1,11 @@
+name = "oauth-relay"
+main = "src/worker.ts"
+compatibility_date = "2026-04-22"
+
+[[kv_namespaces]]
+binding = "OAuthCallback"
+id = "__KV_OAUTH_CALLBACK_ID__"
+
+[[kv_namespaces]]
+binding = "Auth"
+id = "__KV_AUTH_ID__"

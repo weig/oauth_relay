@@ -1,0 +1,15 @@
+# Secrets and generated config
+.env
+wrangler.toml
+
+# Dependencies
+node_modules/
+
+# Wrangler local state
+.wrangler/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.log

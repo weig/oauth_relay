@@ -1,0 +1,17 @@
+{
+  "name": "oauth-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Workers OAuth callback relay for CLI tools",
+  "license": "MIT",
+  "scripts": {
+    "deploy": "bin/deploy.sh",
+    "auth": "bin/auth.sh",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}
